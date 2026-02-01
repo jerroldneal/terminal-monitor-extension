@@ -29,6 +29,16 @@ function activate(context) {
             })
         );
 
+        // Listen for terminal state changes (activity detection)
+        context.subscriptions.push(
+            vscode.window.onDidChangeTerminalState(event => {
+                const terminal = event.terminal;
+                // Reset the activity timestamp when terminal state changes
+                terminalActivity.set(terminal, Date.now());
+                console.log(`Terminal state changed: ${terminal.name} - activity reset`);
+            })
+        );
+
         // Start monitoring command
         let startCmd = vscode.commands.registerCommand('terminalMonitor.start', () => {
             if (monitorInterval) {
