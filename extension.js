@@ -63,6 +63,14 @@ function activate(context) {
         console.error('Terminal Monitor activation failed:', error);
         vscode.window.showErrorMessage(`Terminal Monitor failed to activate: ${error.message}`);
     }
+}
+
+function checkTerminals() {
+    const now = Date.now();
+    const terminals = vscode.window.terminals;
+    const protectedNames = ['PowerShell Extension', 'Monitor Idle Terminals', 'Start Terminal Monitor'];
+
+    for (const terminal of terminals) {
         // Skip protected terminals
         if (protectedNames.includes(terminal.name)) {
             continue;
