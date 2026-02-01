@@ -20,6 +20,16 @@
         "command": "terminalMonitor.stop",
         "title": "Terminal Monitor: Stop"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Terminal Monitor",
+      "properties": {
+        "terminalMonitor.enableLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable detailed logging of terminal activity to the Terminal Monitor output channel"
+        }
+      }
+    }
   }
 }
