@@ -35,7 +35,7 @@ function activate(context) {
                 const terminal = event.terminal;
                 const activity = terminalActivity.get(terminal);
                 const newState = terminal.state ? terminal.state.isInteractedWith : false;
-                
+
                 if (activity) {
                     // Reset timestamp on state change
                     activity.timestamp = Date.now();
@@ -144,6 +144,7 @@ function checkTerminals() {
             continue;
         }
 
+        const activity = terminalActivity.get(terminal);
         const idleTime = now - activity.timestamp;
         const idleSeconds = Math.floor(idleTime / 1000);
 
