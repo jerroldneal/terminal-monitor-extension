@@ -2,13 +2,17 @@
   "name": "terminal-monitor",
   "displayName": "Terminal Monitor",
   "description": "Automatically closes idle terminals",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "jerroldneal",
   "engines": {
     "vscode": "^1.80.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
