@@ -6,54 +6,63 @@ const IDLE_TIMEOUT = 60000; // 1 minute
 const CHECK_INTERVAL = 10000; // 10 seconds
 
 function activate(context) {
-    console.log('Terminal Monitor extension activated');
+    try {
+        console.log('Terminal Monitor extension activating...');
 
-    // Start monitoring command
-    let startCmd = vscode.commands.registerCommand('terminalMonitor.start', () => {
-        if (monitorInterval) {
-            vscode.window.showInformationMessage('Terminal Monitor is already running');
-            return;
-        }
-
-        vscode.window.showInformationMessage('Terminal Monitor started');
-        monitorInterval = setInterval(checkTerminals, CHECK_INTERVAL);
-
-        // Track new terminals
+        // Register event handlers once at activation
         context.subscriptions.push(
             vscode.window.onDidOpenTerminal(terminal => {
                 terminalActivity.set(terminal, Date.now());
+                console.log(`Terminal opened: ${terminal.name}`);
             })
         );
 
         context.subscriptions.push(
             vscode.window.onDidCloseTerminal(terminal => {
                 terminalActivity.delete(terminal);
+                console.log(`Terminal closed: ${terminal.name}`);
             })
         );
-    });
 
-    // Stop monitoring command
-    let stopCmd = vscode.commands.registerCommand('terminalMonitor.stop', () => {
-        if (monitorInterval) {
-            clearInterval(monitorInterval);
-            monitorInterval = null;
-            vscode.window.showInformationMessage('Terminal Monitor stopped');
-        }
-    });
+        // Start monitoring command
+        let startCmd = vscode.commands.registerCommand('terminalMonitor.start', () => {
+            if (monitorInterval) {
+                vscode.window.showInformationMessage('Terminal Monitor is already running');
+                return;
+            }
 
-    context.subscriptions.push(startCmd);
-    context.subscriptions.push(stopCmd);
+            vscode.window.showInformationMessage('Terminal Monitor started');
+            monitorInterval = setInterval(checkTerminals, CHECK_INTERVAL);
+            console.log('Terminal Monitor started');
+        });
 
-    // Auto-start on activation
-    vscode.commands.executeCommand('terminalMonitor.start');
-}
+        // Stop monitoring command
+        let stopCmd = vscode.commands.registerCommand('terminalMonitor.stop', () => {
+            if (monitorInterval) {
+                clearInterval(monitorInterval);
+                monitorInterval = null;
+                vscode.window.showInformationMessage('Terminal Monitor stopped');
+                console.log('Terminal Monitor stopped');
+            }
+        });
 
-function checkTerminals() {
-    const now = Date.now();
-    const terminals = vscode.window.terminals;
-    const protectedNames = ['PowerShell Extension', 'Monitor Idle Terminals'];
+        context.subscriptions.push(startCmd);
+        context.subscriptions.push(stopCmd);
 
-    for (const terminal of terminals) {
+        // Auto-start on activation
+        setTimeout(() => {
+            vscode.commands.executeCommand('terminalMonitor.start').then(() => {
+                console.log('Terminal Monitor auto-started successfully');
+            }, (error) => {
+                console.error('Failed to auto-start Terminal Monitor:', error);
+            });
+        }, 1000);
+
+        console.log('Terminal Monitor extension activated successfully');
+    } catch (error) {
+        console.error('Terminal Monitor activation failed:', error);
+        vscode.window.showErrorMessage(`Terminal Monitor failed to activate: ${error.message}`);
+    }
         // Skip protected terminals
         if (protectedNames.includes(terminal.name)) {
             continue;
