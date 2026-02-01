@@ -1,9 +1,11 @@
 const vscode = require('vscode');
 
 let monitorInterval = null;
-const terminalActivity = new Map(); // Stores { timestamp, lastSnapshot }
+const terminalActivity = new Map(); // Stores { timestamp, lastBuffer }
+const terminalBuffers = new Map(); // Stores last 500 bytes of terminal output
 const IDLE_TIMEOUT = 60000; // 1 minute
 const CHECK_INTERVAL = 10000; // 10 seconds
+const BUFFER_SIZE = 500; // bytes
 let outputChannel = null;
 
 function activate(context) {
@@ -17,7 +19,8 @@ function activate(context) {
         // Register event handlers once at activation
         context.subscriptions.push(
             vscode.window.onDidOpenTerminal(terminal => {
-                terminalActivity.set(terminal, { timestamp: Date.now(), lastSnapshot: '' });
+                terminalActivity.set(terminal, { timestamp: Date.now(), lastBuffer: '' });
+                terminalBuffers.set(terminal, '');
                 console.log(`Terminal opened: ${terminal.name}`);
             })
         );
@@ -25,7 +28,35 @@ function activate(context) {
         context.subscriptions.push(
             vscode.window.onDidCloseTerminal(terminal => {
                 terminalActivity.delete(terminal);
+                terminalBuffers.delete(terminal);
                 console.log(`Terminal closed: ${terminal.name}`);
+            })
+        );
+
+        // Track terminal data writes (this is key for detecting actual terminal output)
+        context.subscriptions.push(
+            vscode.window.onDidWriteTerminalData(event => {
+                const terminal = event.terminal;
+                const data = event.data;
+                
+                // Update buffer with new data (keep last 500 bytes)
+                let buffer = terminalBuffers.get(terminal) || '';
+                buffer += data;
+                if (buffer.length > BUFFER_SIZE) {
+                    buffer = buffer.slice(-BUFFER_SIZE);
+                }
+                terminalBuffers.set(terminal, buffer);
+                
+                // Reset activity timestamp
+                const activity = terminalActivity.get(terminal);
+                if (activity) {
+                    activity.timestamp = Date.now();
+                    terminalActivity.set(terminal, activity);
+                } else {
+                    terminalActivity.set(terminal, { timestamp: Date.now(), lastBuffer: buffer });
+                }
+                
+                console.log(`Terminal data written: ${terminal.name} (${data.length} bytes)`);
             })
         );
 
@@ -38,7 +69,7 @@ function activate(context) {
                         activity.timestamp = Date.now();
                         terminalActivity.set(terminal, activity);
                     } else {
-                        terminalActivity.set(terminal, { timestamp: Date.now(), lastSnapshot: '' });
+                        terminalActivity.set(terminal, { timestamp: Date.now(), lastBuffer: '' });
                     }
                     console.log(`Active terminal changed: ${terminal.name} - activity reset`);
                 }
@@ -113,22 +144,16 @@ function checkTerminals() {
             console.log(`Closing exited terminal: ${terminal.name}`);
             terminal.dispose();
             terminalActivity.delete(terminal);
+            terminalBuffers.delete(terminal);
             continue;
         }
 
-        // Create a snapshot of terminal state
-        let currentSnapshot = `${terminal.name}_${terminal.exitStatus || 'running'}`;
-        
-        // Try to get process ID as part of snapshot
-        terminal.processId.then(pid => {
-            if (pid !== undefined) {
-                currentSnapshot += `_pid${pid}`;
-            }
-        }).catch(() => {});
+        // Get current terminal buffer (last 500 bytes)
+        const currentBuffer = terminalBuffers.get(terminal) || '';
 
         // Initialize activity tracking
         if (!terminalActivity.has(terminal)) {
-            terminalActivity.set(terminal, { timestamp: now, lastSnapshot: currentSnapshot });
+            terminalActivity.set(terminal, { timestamp: now, lastBuffer: currentBuffer });
             if (enableLogging && outputChannel) {
                 outputChannel.appendLine(`  - ${terminal.name}: NEW (just detected)`);
             }
@@ -136,17 +161,19 @@ function checkTerminals() {
         }
 
         const activity = terminalActivity.get(terminal);
-        const lastSnapshot = activity.lastSnapshot;
-        
-        // Check if snapshot has changed (indicates activity)
-        if (currentSnapshot !== lastSnapshot) {
-            // Snapshot changed - reset timeout
+        const lastBuffer = activity.lastBuffer;
+
+        // Check if buffer has changed (indicates activity)
+        if (currentBuffer !== lastBuffer && currentBuffer.length > 0) {
+            // Buffer changed - reset timeout
             activity.timestamp = now;
-            activity.lastSnapshot = currentSnapshot;
+            activity.lastBuffer = currentBuffer;
             terminalActivity.set(terminal, activity);
-            
+
             if (enableLogging && outputChannel) {
-                outputChannel.appendLine(`  - ${terminal.name}: 🔄 ACTIVITY DETECTED (timeout reset)`);
+                const bufferPreview = currentBuffer.slice(-50).replace(/\n/g, '\\n');
+                outputChannel.appendLine(`  - ${terminal.name}: 🔄 ACTIVITY DETECTED (buffer changed)`);
+                outputChannel.appendLine(`    Last 50 chars: "${bufferPreview}"`);
             }
             continue;
         }
@@ -167,6 +194,7 @@ function checkTerminals() {
             }
             terminal.dispose();
             terminalActivity.delete(terminal);
+            terminalBuffers.delete(terminal);
         }
     }
 }
