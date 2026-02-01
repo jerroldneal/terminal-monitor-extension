@@ -2,6 +2,7 @@ const vscode = require('vscode');
 
 let monitorInterval = null;
 const terminalActivity = new Map();
+const terminalProcessIds = new Map(); // Track process IDs to detect activity
 const IDLE_TIMEOUT = 60000; // 1 minute
 const CHECK_INTERVAL = 10000; // 10 seconds
 let outputChannel = null;
@@ -25,17 +26,18 @@ function activate(context) {
         context.subscriptions.push(
             vscode.window.onDidCloseTerminal(terminal => {
                 terminalActivity.delete(terminal);
+                terminalProcessIds.delete(terminal);
                 console.log(`Terminal closed: ${terminal.name}`);
             })
         );
 
-        // Listen for terminal state changes (activity detection)
+        // Track active terminal - user switching to a terminal indicates activity
         context.subscriptions.push(
-            vscode.window.onDidChangeTerminalState(event => {
-                const terminal = event.terminal;
-                // Reset the activity timestamp when terminal state changes
-                terminalActivity.set(terminal, Date.now());
-                console.log(`Terminal state changed: ${terminal.name} - activity reset`);
+            vscode.window.onDidChangeActiveTerminal(terminal => {
+                if (terminal) {
+                    terminalActivity.set(terminal, Date.now());
+                    console.log(`Active terminal changed: ${terminal.name} - activity reset`);
+                }
             })
         );
 
@@ -99,6 +101,35 @@ function checkTerminals() {
             continue;
         }
 
+        // Check if terminal has exited
+        if (terminal.exitStatus !== undefined) {
+            if (enableLogging && outputChannel) {
+                outputChannel.appendLine(`  - ${terminal.name}: EXITED - will close`);
+            }
+            console.log(`Closing exited terminal: ${terminal.name}`);
+            terminal.dispose();
+            terminalActivity.delete(terminal);
+            terminalProcessIds.delete(terminal);
+            continue;
+        }
+
+        // Check for process ID changes (indicates activity)
+        terminal.processId.then(pid => {
+            if (pid !== undefined) {
+                const lastPid = terminalProcessIds.get(terminal);
+                if (lastPid !== pid) {
+                    // Process ID changed - indicates new process/activity
+                    terminalProcessIds.set(terminal, pid);
+                    terminalActivity.set(terminal, Date.now());
+                    if (enableLogging && outputChannel) {
+                        outputChannel.appendLine(`  - ${terminal.name}: Process activity detected (PID: ${pid})`);
+                    }
+                }
+            }
+        }).catch(err => {
+            // Ignore errors from processId promise
+        });
+
         // Initialize activity tracking
         if (!terminalActivity.has(terminal)) {
             terminalActivity.set(terminal, now);
@@ -125,6 +156,7 @@ function checkTerminals() {
             }
             terminal.dispose();
             terminalActivity.delete(terminal);
+            terminalProcessIds.delete(terminal);
         }
     }
 }
