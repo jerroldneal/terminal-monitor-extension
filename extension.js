@@ -1,8 +1,7 @@
 const vscode = require('vscode');
 
 let monitorInterval = null;
-const terminalActivity = new Map();
-const terminalProcessIds = new Map(); // Track process IDs to detect activity
+const terminalActivity = new Map(); // Stores { timestamp, lastSnapshot }
 const IDLE_TIMEOUT = 60000; // 1 minute
 const CHECK_INTERVAL = 10000; // 10 seconds
 let outputChannel = null;
@@ -18,7 +17,7 @@ function activate(context) {
         // Register event handlers once at activation
         context.subscriptions.push(
             vscode.window.onDidOpenTerminal(terminal => {
-                terminalActivity.set(terminal, Date.now());
+                terminalActivity.set(terminal, { timestamp: Date.now(), lastSnapshot: '' });
                 console.log(`Terminal opened: ${terminal.name}`);
             })
         );
@@ -26,7 +25,6 @@ function activate(context) {
         context.subscriptions.push(
             vscode.window.onDidCloseTerminal(terminal => {
                 terminalActivity.delete(terminal);
-                terminalProcessIds.delete(terminal);
                 console.log(`Terminal closed: ${terminal.name}`);
             })
         );
@@ -35,7 +33,13 @@ function activate(context) {
         context.subscriptions.push(
             vscode.window.onDidChangeActiveTerminal(terminal => {
                 if (terminal) {
-                    terminalActivity.set(terminal, Date.now());
+                    const activity = terminalActivity.get(terminal);
+                    if (activity) {
+                        activity.timestamp = Date.now();
+                        terminalActivity.set(terminal, activity);
+                    } else {
+                        terminalActivity.set(terminal, { timestamp: Date.now(), lastSnapshot: '' });
+                    }
                     console.log(`Active terminal changed: ${terminal.name} - activity reset`);
                 }
             })
@@ -109,38 +113,45 @@ function checkTerminals() {
             console.log(`Closing exited terminal: ${terminal.name}`);
             terminal.dispose();
             terminalActivity.delete(terminal);
-            terminalProcessIds.delete(terminal);
             continue;
         }
 
-        // Check for process ID changes (indicates activity)
+        // Create a snapshot of terminal state
+        let currentSnapshot = `${terminal.name}_${terminal.exitStatus || 'running'}`;
+        
+        // Try to get process ID as part of snapshot
         terminal.processId.then(pid => {
             if (pid !== undefined) {
-                const lastPid = terminalProcessIds.get(terminal);
-                if (lastPid !== pid) {
-                    // Process ID changed - indicates new process/activity
-                    terminalProcessIds.set(terminal, pid);
-                    terminalActivity.set(terminal, Date.now());
-                    if (enableLogging && outputChannel) {
-                        outputChannel.appendLine(`  - ${terminal.name}: Process activity detected (PID: ${pid})`);
-                    }
-                }
+                currentSnapshot += `_pid${pid}`;
             }
-        }).catch(err => {
-            // Ignore errors from processId promise
-        });
+        }).catch(() => {});
 
         // Initialize activity tracking
         if (!terminalActivity.has(terminal)) {
-            terminalActivity.set(terminal, now);
+            terminalActivity.set(terminal, { timestamp: now, lastSnapshot: currentSnapshot });
             if (enableLogging && outputChannel) {
                 outputChannel.appendLine(`  - ${terminal.name}: NEW (just detected)`);
             }
             continue;
         }
 
-        const lastActivity = terminalActivity.get(terminal);
-        const idleTime = now - lastActivity;
+        const activity = terminalActivity.get(terminal);
+        const lastSnapshot = activity.lastSnapshot;
+        
+        // Check if snapshot has changed (indicates activity)
+        if (currentSnapshot !== lastSnapshot) {
+            // Snapshot changed - reset timeout
+            activity.timestamp = now;
+            activity.lastSnapshot = currentSnapshot;
+            terminalActivity.set(terminal, activity);
+            
+            if (enableLogging && outputChannel) {
+                outputChannel.appendLine(`  - ${terminal.name}: 🔄 ACTIVITY DETECTED (timeout reset)`);
+            }
+            continue;
+        }
+
+        const idleTime = now - activity.timestamp;
         const idleSeconds = Math.floor(idleTime / 1000);
 
         if (enableLogging && outputChannel) {
@@ -156,7 +167,6 @@ function checkTerminals() {
             }
             terminal.dispose();
             terminalActivity.delete(terminal);
-            terminalProcessIds.delete(terminal);
         }
     }
 }
